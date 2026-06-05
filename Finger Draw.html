@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FingerCanvas Pro — Full Hand Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #060810;
+  --surface: #0c0f18;
+  --surface2: #131826;
+  --border: rgba(255,255,255,0.06);
+  --border2: rgba(255,255,255,0.11);
+  --accent: #00f5c4;
+  --accent2: #7b6ef6;
+  --accent3: #ff6b6b;
+  --text: #e8edf5;
+  --muted: #5a6882;
+  --glow: rgba(0,245,196,0.18);
+}
+html, body {
+  width:100%; height:100%; overflow:hidden;
+  background:var(--bg);
+  font-family:'Syne',sans-serif;
+  color:var(--text);
+  user-select:none;
+}
+body::before {
+  content:''; position:fixed; inset:0;
+  background-image:
+    linear-gradient(rgba(0,245,196,0.025) 1px, transparent 1px),
+    linear-gradient(90deg,rgba(0,245,196,0.025) 1px, transparent 1px);
+  background-size:48px 48px;
+  animation:gridMove 24s linear infinite;
+  pointer-events:none; z-index:0;
+}
+@keyframes gridMove{0%{background-position:0 0}100%{background-position:48px 48px}}
+#app { position:relative; z-index:1; display:flex; flex-direction:column; width:100%; height:100%; }
+
+/* HEADER */
+header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 20px;
+  border-bottom:1px solid var(--border);
+  background:rgba(6,8,16,0.92);
+  backdrop-filter:blur(20px);
+  flex-shrink:0; z-index:10;
+}
+.logo { display:flex; align-items:center; gap:10px; }
+.logo-icon {
+  width:30px; height:30px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:15px;
+}
+.logo-text { font-size:17px; font-weight:800; letter-spacing:-0.5px; }
+.logo-text span { color:var(--accent); }
+.header-center { display:flex; align-items:center; gap:8px; }
+.mode-badge {
+  display:flex; align-items:center; gap:6px;
+  padding:5px 12px; border-radius:999px;
+  border:1px solid var(--border2); background:var(--surface);
+  font-size:12px; font-family:'DM Mono',monospace;
+  transition:all 0.25s; min-width:130px;
+}
+.mode-dot { width:7px; height:7px; border-radius:50%; background:var(--muted); transition:all 0.25s; }
+.mode-draw .mode-dot  { background:var(--accent);  box-shadow:0 0 8px var(--accent); }
+.mode-erase .mode-dot { background:var(--accent3); box-shadow:0 0 8px var(--accent3); }
+.mode-hover .mode-dot { background:var(--accent2); box-shadow:0 0 8px var(--accent2); }
+.header-right { display:flex; align-items:center; gap:8px; }
+.hdr-btn {
+  padding:5px 12px; border-radius:8px; border:1px solid var(--border2);
+  background:var(--surface); color:var(--muted); font-size:12px;
+  cursor:pointer; transition:all 0.2s; font-family:'Syne',sans-serif;
+}
+.hdr-btn:hover,.hdr-btn.on { border-color:var(--accent); color:var(--accent); background:rgba(0,245,196,0.06); }
+.hdr-btn.danger:hover { border-color:var(--accent3); color:var(--accent3); background:rgba(255,107,107,0.06); }
+
+/* MAIN LAYOUT */
+main { display:flex; flex:1; overflow:hidden; position:relative; }
+
+/* CANVAS AREA */
+#canvasWrap {
+  flex:1; position:relative; overflow:hidden;
+  background:#030508;
+}
+#video {
+  position:absolute; width:100%; height:100%;
+  object-fit:cover; transform:scaleX(-1);
+  opacity:0.16; filter:grayscale(0.4);
+  transition:opacity 0.3s;
+}
+#drawCanvas, #overlayCanvas, #particleCanvas, #uiCanvas {
+  position:absolute; inset:0; width:100%; height:100%;
+}
+#overlayCanvas, #particleCanvas, #uiCanvas { pointer-events:none; }
+#uiCanvas { z-index:5; }
+
+/* FLOATING HAND UI PANELS - rendered on uiCanvas, but we show DOM tooltips */
+#handTooltip {
+  position:absolute; z-index:20;
+  background:rgba(6,8,16,0.9); border:1px solid var(--border2);
+  border-radius:10px; padding:8px 12px;
+  font-size:12px; font-family:'DM Mono',monospace; color:var(--accent);
+  pointer-events:none; opacity:0; transition:opacity 0.2s;
+  backdrop-filter:blur(10px);
+  white-space:nowrap;
+}
+
+/* COLOR RING - floating over canvas */
+#colorRing {
+  position:absolute; z-index:15;
+  pointer-events:none;
+  opacity:0; transition:opacity 0.3s;
+}
+
+/* BOTTOM TOOLBAR */
+#toolbar {
+  position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+  z-index:10;
+  display:flex; align-items:center; gap:8px;
+  padding:10px 14px;
+  background:rgba(6,8,16,0.88);
+  border:1px solid var(--border2);
+  border-radius:16px;
+  backdrop-filter:blur(20px);
+  box-shadow:0 8px 40px rgba(0,0,0,0.5);
+}
+.tb-sep { width:1px; height:28px; background:var(--border2); margin:0 2px; }
+.tb-label { font-size:10px; color:var(--muted); letter-spacing:1.5px; text-transform:uppercase; }
+
+/* Color swatches in toolbar */
+.tb-colors { display:flex; gap:5px; align-items:center; }
+.tb-swatch {
+  width:26px; height:26px; border-radius:6px;
+  border:2px solid transparent; cursor:pointer;
+  transition:transform 0.15s, border-color 0.15s;
+  position:relative; flex-shrink:0;
+}
+.tb-swatch:hover { transform:scale(1.15); }
+.tb-swatch.active { border-color:#fff; transform:scale(1.12); box-shadow:0 0 8px rgba(255,255,255,0.3); }
+.tb-swatch.rainbow { background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red); }
+
+/* Brush modes in toolbar */
+.tb-modes { display:flex; gap:4px; }
+.tb-mode {
+  padding:5px 10px; border-radius:7px;
+  border:1px solid transparent; background:transparent;
+  color:var(--muted); font-size:12px; cursor:pointer;
+  transition:all 0.2s; font-family:'Syne',sans-serif;
+}
+.tb-mode:hover { background:var(--surface2); color:var(--text); }
+.tb-mode.active { background:rgba(0,245,196,0.1); border-color:rgba(0,245,196,0.25); color:var(--accent); }
+
+/* Sliders in toolbar */
+.tb-slider-group { display:flex; flex-direction:column; gap:4px; min-width:90px; }
+.tb-slider-row { display:flex; align-items:center; gap:6px; }
+.tb-slider {
+  width:72px; height:3px; -webkit-appearance:none; appearance:none;
+  border-radius:2px; outline:none; cursor:pointer;
+}
+.tb-slider.size-slider { background:linear-gradient(90deg,var(--accent),var(--accent2)); }
+.tb-slider.opacity-slider { background:linear-gradient(90deg,rgba(255,255,255,0.1),rgba(255,255,255,0.8)); }
+.tb-slider::-webkit-slider-thumb {
+  -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+  background:#fff; border:2px solid var(--accent); box-shadow:0 0 5px var(--glow);
+}
+.tb-slider-val { font-size:11px; font-family:'DM Mono',monospace; color:var(--accent); min-width:28px; text-align:right; }
+
+/* HAND GESTURE PANEL — floating left panel triggered by hand hover */
+#gesturePanel {
+  position:absolute; left:16px; top:50%; transform:translateY(-50%);
+  z-index:10; width:180px;
+  background:rgba(6,8,16,0.88);
+  border:1px solid var(--border2);
+  border-radius:14px; padding:14px;
+  backdrop-filter:blur(20px);
+  transition:opacity 0.3s, transform 0.3s;
+  box-shadow:0 8px 40px rgba(0,0,0,0.5);
+}
+.gp-title { font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--muted); margin-bottom:12px; }
+.gp-gesture { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:8px; margin-bottom:4px; }
+.gp-gesture.highlight { background:rgba(0,245,196,0.08); border:1px solid rgba(0,245,196,0.15); }
+.gp-emoji { font-size:18px; }
+.gp-info { display:flex; flex-direction:column; gap:1px; }
+.gp-gesture-name { font-size:12px; font-weight:700; color:var(--text); }
+.gp-gesture-desc { font-size:10px; color:var(--muted); }
+
+/* HAND CONTROL ZONES — rendered on canvas, but reference rectangles for hit-testing */
+/* They appear as glowing panels when finger hovers near them */
+
+/* OVERLAYS */
+#startOverlay {
+  position:absolute; inset:0; z-index:30;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px;
+  background:rgba(6,8,16,0.94); backdrop-filter:blur(20px);
+}
+.start-title {
+  font-size:48px; font-weight:800; letter-spacing:-2px; text-align:center; line-height:1.1;
+  background:linear-gradient(135deg,var(--accent),var(--accent2),#ff9ff3);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+}
+.start-sub { font-size:15px; color:var(--muted); text-align:center; max-width:440px; line-height:1.7; }
+.start-gestures { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; max-width:520px; }
+.sg-card {
+  background:var(--surface); border:1px solid var(--border2);
+  border-radius:12px; padding:12px 16px;
+  display:flex; align-items:center; gap:10px; min-width:150px;
+}
+.sg-icon { font-size:24px; }
+.sg-text { display:flex; flex-direction:column; gap:2px; }
+.sg-action { font-size:13px; font-weight:700; color:var(--text); }
+.sg-desc { font-size:11px; color:var(--muted); }
+.start-btn {
+  display:flex; align-items:center; gap:10px;
+  padding:14px 36px; border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#060810; font-family:'Syne',sans-serif; font-weight:800; font-size:15px;
+  border:none; cursor:pointer;
+  box-shadow:0 0 40px rgba(0,245,196,0.25);
+  transition:transform 0.2s, box-shadow 0.2s;
+}
+.start-btn:hover { transform:scale(1.04); box-shadow:0 0 60px rgba(0,245,196,0.35); }
+
+#loadOverlay {
+  position:absolute; inset:0; z-index:29; display:none;
+  flex-direction:column; align-items:center; justify-content:center; gap:16px;
+  background:rgba(6,8,16,0.95); backdrop-filter:blur(10px);
+}
+.load-ring {
+  width:52px; height:52px;
+  border:3px solid var(--surface2); border-top-color:var(--accent);
+  border-radius:50%; animation:spin 0.75s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.load-text { font-size:13px; color:var(--muted); font-family:'DM Mono',monospace; letter-spacing:1px; }
+
+/* HAND HOVER ZONE INDICATORS (shown on canvas via JS) */
+/* Pinch-to-select ring shown around finger */
+.pinch-hint {
+  position:absolute; pointer-events:none; z-index:8;
+  border-radius:50%; border:2px dashed rgba(0,245,196,0.4);
+  animation:pulsePinch 1s ease-in-out infinite;
+  transform:translate(-50%,-50%);
+  transition:opacity 0.2s;
+}
+@keyframes pulsePinch{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.12)}}
+
+/* FOOTER */
+footer {
+  height:26px; flex-shrink:0;
+  background:rgba(6,8,16,0.95); border-top:1px solid var(--border);
+  display:flex; align-items:center; gap:16px; padding:0 14px;
+  font-family:'DM Mono',monospace; font-size:11px; color:var(--muted);
+  z-index:10;
+}
+.ft-dot { width:5px; height:5px; border-radius:50%; background:var(--muted); }
+.ft-dot.on { background:var(--accent); box-shadow:0 0 4px var(--accent); }
+.ft-dot.err { background:var(--accent3); }
+</style>
+</head>
+<body>
+<div id="app">
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">✋</div>
+    <div class="logo-text">Finger<span>Canvas</span> <span style="font-size:10px;font-weight:400;color:var(--muted);letter-spacing:1px;">PRO</span></div>
+  </div>
+  <div class="header-center">
+    <div class="mode-badge gesture-idle" id="modeBadge">
+      <div class="mode-dot"></div>
+      <span id="modeLabel">No hand detected</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <button class="hdr-btn on" id="btnCam" onclick="toggleCamera()">📷 Cam</button>
+    <button class="hdr-btn on" id="btnSkel" onclick="toggleSkeleton()">🦴 Skel</button>
+    <button class="hdr-btn on" id="btnPart" onclick="toggleParticles()">✨ FX</button>
+    <button class="hdr-btn" onclick="undoLast()">↩ Undo</button>
+    <button class="hdr-btn" onclick="saveImg()">⬇ Save</button>
+    <button class="hdr-btn danger" onclick="clearAll()">✕ Clear</button>
+  </div>
+</header>
+
+<main>
+  <div id="canvasWrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="particleCanvas"></canvas>
+    <canvas id="drawCanvas"></canvas>
+    <canvas id="overlayCanvas"></canvas>
+    <canvas id="uiCanvas"></canvas>
+
+    <div id="handTooltip"></div>
+
+    <!-- BOTTOM TOOLBAR -->
+    <div id="toolbar">
+      <span class="tb-label">Color</span>
+      <div class="tb-colors" id="tbColors">
+        <div class="tb-swatch active" style="background:#00f5c4" data-color="#00f5c4" data-idx="0"></div>
+        <div class="tb-swatch" style="background:#7b6ef6" data-color="#7b6ef6" data-idx="1"></div>
+        <div class="tb-swatch" style="background:#ff6b6b" data-color="#ff6b6b" data-idx="2"></div>
+        <div class="tb-swatch" style="background:#ffd93d" data-color="#ffd93d" data-idx="3"></div>
+        <div class="tb-swatch" style="background:#6bcbf7" data-color="#6bcbf7" data-idx="4"></div>
+        <div class="tb-swatch" style="background:#ff9ff3" data-color="#ff9ff3" data-idx="5"></div>
+        <div class="tb-swatch" style="background:#5cf08a" data-color="#5cf08a" data-idx="6"></div>
+        <div class="tb-swatch" style="background:#ff8c00" data-color="#ff8c00" data-idx="7"></div>
+        <div class="tb-swatch" style="background:#fff" data-color="#ffffff" data-idx="8"></div>
+        <div class="tb-swatch" style="background:#ff4fa7" data-color="#ff4fa7" data-idx="9"></div>
+        <div class="tb-swatch rainbow" data-color="rainbow" data-idx="10"></div>
+      </div>
+      <div class="tb-sep"></div>
+      <span class="tb-label">Style</span>
+      <div class="tb-modes" id="tbModes">
+        <button class="tb-mode active" data-mode="pen">✏ Pen</button>
+        <button class="tb-mode" data-mode="glow">✨ Glow</button>
+        <button class="tb-mode" data-mode="spray">🎨 Spray</button>
+        <button class="tb-mode" data-mode="ribbon">🎀 Ribbon</button>
+      </div>
+      <div class="tb-sep"></div>
+      <div class="tb-slider-group">
+        <div class="tb-slider-row">
+          <span class="tb-label" style="min-width:36px">Size</span>
+          <input type="range" class="tb-slider size-slider" id="sizeSlider" min="2" max="40" value="6" step="1">
+          <span class="tb-slider-val" id="sizeVal">6</span>
+        </div>
+        <div class="tb-slider-row">
+          <span class="tb-label" style="min-width:36px">Alpha</span>
+          <input type="range" class="tb-slider opacity-slider" id="opacSlider" min="5" max="100" value="100" step="1">
+          <span class="tb-slider-val" id="opacVal">100%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- GESTURE GUIDE PANEL (left side) -->
+    <div id="gesturePanel">
+      <div class="gp-title">Gesture Guide</div>
+      <div class="gp-gesture highlight" id="gp-current">
+        <span class="gp-emoji">🖐️</span>
+        <div class="gp-info">
+          <div class="gp-gesture-name">Open Hand</div>
+          <div class="gp-gesture-desc">Hover / navigate</div>
+        </div>
+      </div>
+      <div class="gp-gesture">
+        <span class="gp-emoji">☝️</span>
+        <div class="gp-info">
+          <div class="gp-gesture-name">Index Up</div>
+          <div class="gp-gesture-desc">Draw / select</div>
+        </div>
+      </div>
+      <div class="gp-gesture">
+        <span class="gp-emoji">🤏</span>
+        <div class="gp-info">
+          <div class="gp-gesture-name">Pinch</div>
+          <div class="gp-gesture-desc">Pick color / adjust</div>
+        </div>
+      </div>
+      <div class="gp-gesture">
+        <span class="gp-emoji">✌️</span>
+        <div class="gp-info">
+          <div class="gp-gesture-name">Two Fingers</div>
+          <div class="gp-gesture-desc">Drag sliders</div>
+        </div>
+      </div>
+      <div class="gp-gesture">
+        <span class="gp-emoji">✊</span>
+        <div class="gp-info">
+          <div class="gp-gesture-name">Fist</div>
+          <div class="gp-gesture-desc">Erase</div>
+        </div>
+      </div>
+      <div style="margin-top:10px; padding:8px; background:rgba(0,245,196,0.06); border-radius:8px; border:1px solid rgba(0,245,196,0.12);">
+        <div style="font-size:10px; color:var(--accent); letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Hover Zones</div>
+        <div style="font-size:11px; color:var(--muted); line-height:1.5;">
+          Point at toolbar to select colors & modes.<br>
+          Use ✌️ two-finger drag on size/opacity bars.
+        </div>
+      </div>
+    </div>
+
+    <!-- START OVERLAY -->
+    <div id="startOverlay">
+      <div class="start-title">Draw with<br>Your Hands</div>
+      <div class="start-sub">Full hand gesture control — select colors, adjust brush size & opacity, switch modes — all without touching the screen.</div>
+      <div class="start-gestures">
+        <div class="sg-card"><span class="sg-icon">☝️</span><div class="sg-text"><div class="sg-action">Draw</div><div class="sg-desc">Index finger up</div></div></div>
+        <div class="sg-card"><span class="sg-icon">🤏</span><div class="sg-text"><div class="sg-action">Select</div><div class="sg-desc">Pinch over toolbar</div></div></div>
+        <div class="sg-card"><span class="sg-icon">✌️</span><div class="sg-text"><div class="sg-action">Adjust</div><div class="sg-desc">Two-finger drag sliders</div></div></div>
+        <div class="sg-card"><span class="sg-icon">✊</span><div class="sg-text"><div class="sg-action">Erase</div><div class="sg-desc">Close your fist</div></div></div>
+        <div class="sg-card"><span class="sg-icon">🖐️</span><div class="sg-text"><div class="sg-action">Pause</div><div class="sg-desc">Open all fingers</div></div></div>
+      </div>
+      <button class="start-btn" onclick="startCamera()">🎥 Start Camera</button>
+    </div>
+
+    <!-- LOAD OVERLAY -->
+    <div id="loadOverlay" style="display:none; flex-direction:column; align-items:center; justify-content:center; gap:16px; position:absolute; inset:0; z-index:29; background:rgba(6,8,16,0.95); backdrop-filter:blur(10px);">
+      <div class="load-ring"></div>
+      <div class="load-text" id="loadText">Starting camera...</div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="ft-dot" id="camDot"></div>
+  <span id="camSt">Camera off</span>
+  <div class="ft-dot" id="handDot"></div>
+  <span id="handSt">No hand</span>
+  <span id="fpsSt">FPS: —</span>
+  <span id="modeSt" style="margin-left:auto;color:var(--accent)"></span>
+</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+<script>
+/* ═══════════════════════════════
+   STATE
+═══════════════════════════════ */
+let drawColor = '#00f5c4';
+let brushSize = 6;
+let brushOpacity = 1.0;
+let brushMode = 'pen';
+let showCamera = true;
+let showSkeleton = true;
+let showParticles = true;
+let rainbowHue = 0;
+let lastX = null, lastY = null;
+let strokeStarted = false;
+let undoStack = [];
+const MAX_UNDO = 20;
+let frameCount = 0, lastFpsTime = performance.now();
+let mpHands = null, mpCamera = null;
+
+// Hand-UI interaction state
+let fingerPos = null;       // index fingertip canvas position
+let pinchDist = 0;          // thumb-index distance
+let isPinching = false;
+let prevPinching = false;
+let twoFingerPos = null;    // midpoint of index+middle for slider drag
+let prevTwoFingerX = null;
+let currentGesture = 'none';
+
+// Toolbar zones (computed after layout)
+let toolbarZones = [];      // [{type,rect,data}]
+let hoveredZone = null;
+let pinchCooldown = 0;
+
+// Slider drag state
+let draggingSlider = null;  // 'size' or 'opacity'
+let dragStartX = null;
+let dragStartVal = null;
+
+/* ═══════════════════════════════
+   CANVAS SETUP
+═══════════════════════════════ */
+const video        = document.getElementById('video');
+const drawCanvas   = document.getElementById('drawCanvas');
+const overlayCanvas= document.getElementById('overlayCanvas');
+const particleCanvas= document.getElementById('particleCanvas');
+const uiCanvas     = document.getElementById('uiCanvas');
+const dctx = drawCanvas.getContext('2d');
+const octx = overlayCanvas.getContext('2d');
+const pctx = particleCanvas.getContext('2d');
+const uctx = uiCanvas.getContext('2d');
+
+function resizeAll() {
+  const wrap = document.getElementById('canvasWrap');
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  [drawCanvas, overlayCanvas, particleCanvas, uiCanvas].forEach(c => {
+    if (c === drawCanvas && (c.width !== w || c.height !== h)) {
+      const saved = dctx.getImageData(0, 0, c.width, c.height);
+      c.width = w; c.height = h;
+      dctx.putImageData(saved, 0, 0);
+    } else if (c !== drawCanvas) {
+      c.width = w; c.height = h;
+    }
+  });
+  computeToolbarZones();
+}
+window.addEventListener('resize', () => { resizeAll(); });
+setTimeout(resizeAll, 80);
+
+/* ═══════════════════════════════
+   TOOLBAR DOM INTERACTION (mouse fallback)
+═══════════════════════════════ */
+document.getElementById('tbColors').addEventListener('click', e => {
+  const sw = e.target.closest('.tb-swatch');
+  if (!sw) return;
+  selectColor(sw.dataset.color, sw.dataset.idx);
+});
+document.querySelectorAll('.tb-mode').forEach(btn => {
+  btn.addEventListener('click', () => selectMode(btn.dataset.mode));
+});
+const sizeSlider = document.getElementById('sizeSlider');
+const sizeVal    = document.getElementById('sizeVal');
+sizeSlider.oninput = () => { brushSize = +sizeSlider.value; sizeVal.textContent = brushSize; updateModeSt(); };
+const opacSlider = document.getElementById('opacSlider');
+const opacVal    = document.getElementById('opacVal');
+opacSlider.oninput = () => { brushOpacity = +opacSlider.value / 100; opacVal.textContent = opacSlider.value + '%'; };
+
+function selectColor(color, idx) {
+  drawColor = color;
+  document.querySelectorAll('.tb-swatch').forEach(s => s.classList.remove('active'));
+  const sw = document.querySelector(`.tb-swatch[data-idx="${idx}"]`);
+  if (sw) sw.classList.add('active');
+  updateModeSt();
+}
+function selectMode(mode) {
+  brushMode = mode;
+  document.querySelectorAll('.tb-mode').forEach(b => b.classList.remove('active'));
+  const btn = document.querySelector(`.tb-mode[data-mode="${mode}"]`);
+  if (btn) btn.classList.add('active');
+  updateModeSt();
+}
+
+/* ═══════════════════════════════
+   TOOLBAR ZONE MAPPING (for hand hover)
+═══════════════════════════════ */
+function computeToolbarZones() {
+  toolbarZones = [];
+  const wrap = document.getElementById('canvasWrap');
+  const wrapRect = wrap.getBoundingClientRect();
+
+  // Color swatches
+  document.querySelectorAll('.tb-swatch').forEach(sw => {
+    const r = sw.getBoundingClientRect();
+    toolbarZones.push({
+      type: 'color',
+      rect: { x: r.left - wrapRect.left, y: r.top - wrapRect.top, w: r.width, h: r.height },
+      color: sw.dataset.color,
+      idx: sw.dataset.idx
+    });
+  });
+
+  // Mode buttons
+  document.querySelectorAll('.tb-mode').forEach(btn => {
+    const r = btn.getBoundingClientRect();
+    toolbarZones.push({
+      type: 'mode',
+      rect: { x: r.left - wrapRect.left, y: r.top - wrapRect.top, w: r.width, h: r.height },
+      mode: btn.dataset.mode
+    });
+  });
+
+  // Size slider
+  const sr = document.getElementById('sizeSlider').getBoundingClientRect();
+  toolbarZones.push({
+    type: 'slider', slider: 'size',
+    rect: { x: sr.left - wrapRect.left - 10, y: sr.top - wrapRect.top - 10, w: sr.width + 20, h: sr.height + 20 }
+  });
+
+  // Opacity slider
+  const or = document.getElementById('opacSlider').getBoundingClientRect();
+  toolbarZones.push({
+    type: 'slider', slider: 'opacity',
+    rect: { x: or.left - wrapRect.left - 10, y: or.top - wrapRect.top - 10, w: or.width + 20, h: or.height + 20 }
+  });
+}
+setTimeout(computeToolbarZones, 500);
+
+function hitZone(x, y) {
+  for (const z of toolbarZones) {
+    const r = z.rect;
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return z;
+  }
+  return null;
+}
+
+/* ═══════════════════════════════
+   HAND → CANVAS COORDINATES
+═══════════════════════════════ */
+function lmToCanvas(lm, idx) {
+  const w = drawCanvas.width, h = drawCanvas.height;
+  return { x: (1 - lm[idx].x) * w, y: lm[idx].y * h };
+}
+function lmDist(lm, a, b) {
+  const dx = lm[a].x - lm[b].x, dy = lm[a].y - lm[b].y;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+
+/* ═══════════════════════════════
+   GESTURE DETECTION
+═══════════════════════════════ */
+function fingerUp(lm, tip, pip) { return lm[tip].y < lm[pip].y; }
+function detectGesture(lm) {
+  const i = fingerUp(lm, 8, 6);
+  const m = fingerUp(lm, 12, 10);
+  const r = fingerUp(lm, 16, 14);
+  const p = fingerUp(lm, 20, 18);
+  const thumbDist = lmDist(lm, 4, 8);
+  const pinch = thumbDist < 0.07;
+
+  if (!i && !m && !r && !p) return 'fist';
+  if (pinch) return 'pinch';
+  if (i && m && !r && !p) return 'two';
+  if (i && !m && !r && !p) return 'point';
+  if (i && m && r && p) return 'open';
+  return 'other';
+}
+
+/* ═══════════════════════════════
+   PARTICLES
+═══════════════════════════════ */
+const particles = [];
+function addParticles(x, y, color) {
+  if (!showParticles) return;
+  for (let i = 0; i < 4; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random()-0.5)*4,
+      vy: (Math.random()-0.5)*4,
+      r: Math.random()*3+1,
+      color, life:1,
+      decay: Math.random()*0.045+0.02
+    });
+  }
+}
+function tickParticles() {
+  pctx.clearRect(0,0,particleCanvas.width,particleCanvas.height);
+  for (let i=particles.length-1;i>=0;i--) {
+    const p=particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.06; p.life-=p.decay;
+    if(p.life<=0){particles.splice(i,1);continue;}
+    pctx.globalAlpha=p.life*0.75;
+    pctx.beginPath(); pctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    pctx.fillStyle=p.color; pctx.fill();
+  }
+  pctx.globalAlpha=1;
+  requestAnimationFrame(tickParticles);
+}
+tickParticles();
+
+/* ═══════════════════════════════
+   DRAWING
+═══════════════════════════════ */
+function getColor() {
+  if (drawColor==='rainbow') { rainbowHue=(rainbowHue+2)%360; return `hsl(${rainbowHue},100%,60%)`; }
+  return drawColor;
+}
+function saveUndo() {
+  if (undoStack.length>=MAX_UNDO) undoStack.shift();
+  undoStack.push(dctx.getImageData(0,0,drawCanvas.width,drawCanvas.height));
+}
+function undoLast() {
+  if(!undoStack.length) return;
+  dctx.putImageData(undoStack.pop(),0,0);
+}
+function clearAll() { saveUndo(); dctx.clearRect(0,0,drawCanvas.width,drawCanvas.height); }
+function saveImg() {
+  const t=document.createElement('canvas');
+  t.width=drawCanvas.width; t.height=drawCanvas.height;
+  const tc=t.getContext('2d');
+  tc.fillStyle='#060810'; tc.fillRect(0,0,t.width,t.height);
+  tc.drawImage(drawCanvas,0,0);
+  const a=document.createElement('a');
+  a.download='fingercanvas-'+Date.now()+'.png';
+  a.href=t.toDataURL(); a.click();
+}
+
+function doStroke(x, y, col) {
+  const alpha = brushOpacity;
+  if (brushMode==='pen') {
+    dctx.globalAlpha=alpha;
+    if (lastX!==null) {
+      dctx.beginPath(); dctx.moveTo(lastX,lastY); dctx.lineTo(x,y);
+      dctx.strokeStyle=col; dctx.lineWidth=brushSize;
+      dctx.lineCap='round'; dctx.lineJoin='round'; dctx.stroke();
+    }
+  } else if (brushMode==='glow') {
+    if (lastX!==null) {
+      for (let s=brushSize*3.5;s>0;s-=brushSize*0.6) {
+        dctx.beginPath(); dctx.moveTo(lastX,lastY); dctx.lineTo(x,y);
+        dctx.strokeStyle=col; dctx.lineWidth=s;
+        dctx.globalAlpha=alpha*0.12*(1-s/(brushSize*3.5));
+        dctx.lineCap='round'; dctx.lineJoin='round'; dctx.stroke();
+      }
+      dctx.beginPath(); dctx.moveTo(lastX,lastY); dctx.lineTo(x,y);
+      dctx.strokeStyle='#fff'; dctx.lineWidth=brushSize*0.35;
+      dctx.globalAlpha=alpha*0.85; dctx.stroke();
+    }
+  } else if (brushMode==='spray') {
+    for (let i=0;i<35;i++) {
+      const a2=Math.random()*Math.PI*2, rd=Math.random()*brushSize*3;
+      dctx.beginPath(); dctx.arc(x+Math.cos(a2)*rd,y+Math.sin(a2)*rd,0.8,0,Math.PI*2);
+      dctx.fillStyle=col; dctx.globalAlpha=alpha*Math.random()*0.55; dctx.fill();
+    }
+  } else if (brushMode==='ribbon') {
+    if (lastX!==null) {
+      const dx=x-lastX,dy=y-lastY,len=Math.sqrt(dx*dx+dy*dy)||1;
+      const nx=-dy/len*(brushSize*0.6),ny=dx/len*(brushSize*0.6);
+      dctx.globalAlpha=alpha;
+      dctx.beginPath();
+      dctx.moveTo(lastX+nx,lastY+ny); dctx.lineTo(x+nx,y+ny);
+      dctx.lineTo(x-nx,y-ny); dctx.lineTo(lastX-nx,lastY-ny);
+      dctx.closePath(); dctx.fillStyle=col; dctx.fill();
+    }
+  }
+  dctx.globalAlpha=1; dctx.globalCompositeOperation='source-over';
+}
+
+/* ═══════════════════════════════
+   SKELETON DRAWING
+═══════════════════════════════ */
+const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+function drawSkeleton(lm) {
+  if (!showSkeleton) return;
+  octx.strokeStyle='rgba(255,255,255,0.12)'; octx.lineWidth=1;
+  CONN.forEach(([a,b])=>{
+    const pa=lmToCanvas(lm,a),pb=lmToCanvas(lm,b);
+    octx.beginPath(); octx.moveTo(pa.x,pa.y); octx.lineTo(pb.x,pb.y); octx.stroke();
+  });
+  lm.forEach((_,i)=>{
+    const p=lmToCanvas(lm,i);
+    octx.beginPath(); octx.arc(p.x,p.y,i===8?4:2,0,Math.PI*2);
+    octx.fillStyle=i===8?'rgba(0,245,196,0.8)':i===4?'rgba(255,200,0,0.6)':'rgba(255,255,255,0.25)';
+    octx.fill();
+  });
+}
+
+/* ═══════════════════════════════
+   UI OVERLAY (zones, cursor, highlights)
+═══════════════════════════════ */
+function drawUI(fx, fy, gesture, zone) {
+  uctx.clearRect(0,0,uiCanvas.width,uiCanvas.height);
+  if (!fx && fx!==0) return;
+
+  // finger cursor ring
+  const col = drawColor==='rainbow' ? `hsl(${rainbowHue},100%,60%)` : drawColor;
+  if (gesture==='point') {
+    // draw cursor
+    uctx.beginPath(); uctx.arc(fx,fy,brushSize/2+8,0,Math.PI*2);
+    uctx.strokeStyle=col; uctx.lineWidth=2;
+    uctx.setLineDash([4,4]); uctx.stroke(); uctx.setLineDash([]);
+    uctx.beginPath(); uctx.arc(fx,fy,3,0,Math.PI*2);
+    uctx.fillStyle=col; uctx.fill();
+  } else if (gesture==='pinch') {
+    uctx.beginPath(); uctx.arc(fx,fy,16,0,Math.PI*2);
+    uctx.strokeStyle='rgba(255,215,0,0.8)'; uctx.lineWidth=2.5; uctx.stroke();
+    uctx.beginPath(); uctx.arc(fx,fy,6,0,Math.PI*2);
+    uctx.fillStyle='rgba(255,215,0,0.9)'; uctx.fill();
+  } else if (gesture==='two') {
+    uctx.beginPath(); uctx.arc(fx,fy,14,0,Math.PI*2);
+    uctx.strokeStyle='rgba(123,110,246,0.8)'; uctx.lineWidth=2.5; uctx.stroke();
+  } else if (gesture==='fist') {
+    uctx.beginPath(); uctx.arc(fx,fy,36,0,Math.PI*2);
+    uctx.strokeStyle='rgba(255,107,107,0.7)'; uctx.lineWidth=2; uctx.stroke();
+    uctx.beginPath(); uctx.arc(fx,fy,36,0,Math.PI*2);
+    uctx.fillStyle='rgba(255,107,107,0.06)'; uctx.fill();
+  } else {
+    // open/idle - show dot
+    uctx.beginPath(); uctx.arc(fx,fy,8,0,Math.PI*2);
+    uctx.strokeStyle='rgba(255,255,255,0.25)'; uctx.lineWidth=1.5; uctx.stroke();
+  }
+
+  // highlight hovered zone
+  if (zone) {
+    const r = zone.rect;
+    uctx.save();
+    uctx.beginPath();
+    roundRect(uctx, r.x-4, r.y-4, r.w+8, r.h+8, 8);
+    uctx.strokeStyle = zone.type==='color' ? (zone.color==='rainbow'?'#fff':zone.color) : 'rgba(0,245,196,0.8)';
+    uctx.lineWidth = 2;
+    uctx.stroke();
+    uctx.fillStyle = 'rgba(255,255,255,0.04)';
+    uctx.fill();
+    uctx.restore();
+
+    // tooltip
+    const tip = document.getElementById('handTooltip');
+    let label = '';
+    if (zone.type==='color') label = `🎨 ${zone.color==='rainbow'?'Rainbow':zone.color}`;
+    else if (zone.type==='mode') label = `✏ ${zone.mode}`;
+    else if (zone.type==='slider') label = zone.slider==='size' ? `📏 Size: ${brushSize}` : `💧 Opacity: ${Math.round(brushOpacity*100)}%`;
+    tip.textContent = label + (gesture==='pinch'?' — PINCH to select':'');
+    tip.style.left = Math.min(r.x, uiCanvas.width-160) + 'px';
+    tip.style.top  = (r.y - 36) + 'px';
+    tip.style.opacity = '1';
+  } else {
+    document.getElementById('handTooltip').style.opacity = '0';
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+}
+
+/* ═══════════════════════════════
+   STATUS / UI HELPERS
+═══════════════════════════════ */
+function setModeUI(gesture, label) {
+  const b = document.getElementById('modeBadge');
+  b.className = 'mode-badge ' +
+    (gesture==='point'?'mode-draw':gesture==='fist'||gesture==='erase'?'mode-erase':'mode-hover');
+  document.getElementById('modeLabel').textContent = label;
+}
+function updateModeSt() {
+  const col = drawColor==='rainbow'?'🌈':drawColor;
+  document.getElementById('modeSt').textContent = `${brushMode} · ${col} · ${brushSize}px · ${Math.round(brushOpacity*100)}%`;
+}
+updateModeSt();
+
+function toggleCamera()   { showCamera=!showCamera; video.style.opacity=showCamera?'0.16':'0'; document.getElementById('btnCam').classList.toggle('on',showCamera); }
+function toggleSkeleton() { showSkeleton=!showSkeleton; document.getElementById('btnSkel').classList.toggle('on',showSkeleton); }
+function toggleParticles(){ showParticles=!showParticles; document.getElementById('btnPart').classList.toggle('on',showParticles); }
+
+/* ═══════════════════════════════
+   FPS
+═══════════════════════════════ */
+function tickFPS() {
+  frameCount++;
+  const now=performance.now();
+  if (now-lastFpsTime>=1000) {
+    document.getElementById('fpsSt').textContent=`FPS: ${frameCount}`;
+    frameCount=0; lastFpsTime=now;
+  }
+}
+
+/* ═══════════════════════════════
+   MEDIAPIPE RESULTS
+═══════════════════════════════ */
+let prevErasing = false;
+
+function onResults(results) {
+  tickFPS();
+  octx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
+
+  if (!results.multiHandLandmarks?.length) {
+    setModeUI('idle','No hand detected');
+    document.getElementById('handDot').className='ft-dot err';
+    document.getElementById('handSt').textContent='No hand';
+    drawUI(null,null,'none',null);
+    lastX=null; lastY=null; strokeStarted=false;
+    return;
+  }
+
+  document.getElementById('handDot').className='ft-dot on';
+  document.getElementById('handSt').textContent='Hand ✓';
+
+  const lm = results.multiHandLandmarks[0];
+  drawSkeleton(lm);
+
+  const gesture  = detectGesture(lm);
+  const tipPos   = lmToCanvas(lm, 8);   // index fingertip
+  const thumbPos = lmToCanvas(lm, 4);   // thumb tip
+  const midPos   = lmToCanvas(lm,12);   // middle fingertip
+  const knuckle  = lmToCanvas(lm, 9);
+
+  // Midpoint of index+middle for two-finger drag
+  const twoMid = { x:(tipPos.x+midPos.x)/2, y:(tipPos.y+midPos.y)/2 };
+
+  // Pinch distance in canvas space
+  const pd = Math.hypot(tipPos.x-thumbPos.x, tipPos.y-thumbPos.y);
+  isPinching = pd < 38;
+
+  // Zone hit test using fingertip
+  const zone = hitZone(tipPos.x, tipPos.y);
+
+  currentGesture = gesture;
+  drawUI(tipPos.x, tipPos.y, gesture, zone);
+
+  /* ── PINCH → SELECT zone ── */
+  if (isPinching && !prevPinching && pinchCooldown<=0) {
+    if (zone) {
+      if (zone.type==='color') {
+        selectColor(zone.color, zone.idx);
+        flashZone(zone);
+        pinchCooldown = 18;
+      } else if (zone.type==='mode') {
+        selectMode(zone.mode);
+        flashZone(zone);
+        pinchCooldown = 18;
+      }
+    }
+  }
+  prevPinching = isPinching;
+  if (pinchCooldown>0) pinchCooldown--;
+
+  /* ── TWO-FINGER DRAG → sliders ── */
+  if (gesture==='two' && zone && zone.type==='slider') {
+    if (prevTwoFingerX===null) {
+      prevTwoFingerX=twoMid.x;
+      dragStartVal = zone.slider==='size'?brushSize:Math.round(brushOpacity*100);
+    } else {
+      const delta = (twoMid.x - prevTwoFingerX) * 0.5;
+      prevTwoFingerX = twoMid.x;
+      if (zone.slider==='size') {
+        brushSize = Math.max(2, Math.min(40, brushSize + delta));
+        sizeSlider.value = Math.round(brushSize);
+        sizeVal.textContent = Math.round(brushSize);
+      } else {
+        const pct = Math.max(5, Math.min(100, Math.round(brushOpacity*100)+delta));
+        brushOpacity = pct/100;
+        opacSlider.value = Math.round(pct);
+        opacVal.textContent = Math.round(pct)+'%';
+      }
+      updateModeSt();
+    }
+    setModeUI('hover', `✌️ ${zone.slider==='size'?'Size':'Opacity'}: ${zone.slider==='size'?Math.round(brushSize):Math.round(brushOpacity*100)+'%'}`);
+  } else {
+    prevTwoFingerX = null;
+  }
+
+  /* ── POINT → DRAW ── */
+  if (gesture==='point') {
+    setModeUI('point','✏ Drawing');
+    const col = getColor();
+    if (!strokeStarted) { saveUndo(); strokeStarted=true; }
+    doStroke(tipPos.x, tipPos.y, col);
+    addParticles(tipPos.x, tipPos.y, col);
+    lastX=tipPos.x; lastY=tipPos.y;
+
+  /* ── FIST → ERASE ── */
+  } else if (gesture==='fist') {
+    setModeUI('erase','✊ Erasing');
+    if (!prevErasing) { saveUndo(); prevErasing=true; }
+    dctx.save();
+    dctx.globalCompositeOperation='destination-out';
+    dctx.beginPath(); dctx.arc(knuckle.x,knuckle.y,36,0,Math.PI*2);
+    dctx.fillStyle='rgba(0,0,0,1)'; dctx.fill();
+    dctx.restore();
+    strokeStarted=false; lastX=null; lastY=null;
+
+  /* ── PINCH (not on zone) → DRAW thin ── */
+  } else if (gesture==='pinch' && !zone) {
+    setModeUI('hover','🤏 Pinch');
+    strokeStarted=false; lastX=null; lastY=null;
+
+  } else {
+    setModeUI('hover', gesture==='open'?'🖐 Hover':'🤚 Idle');
+    strokeStarted=false; lastX=null; lastY=null;
+  }
+  if (gesture!=='fist') prevErasing=false;
+}
+
+function flashZone(zone) {
+  const r = zone.rect;
+  uctx.save();
+  uctx.beginPath(); roundRect(uctx, r.x-4,r.y-4,r.w+8,r.h+8,8);
+  uctx.fillStyle='rgba(255,215,0,0.3)'; uctx.fill();
+  uctx.restore();
+}
+
+/* ═══════════════════════════════
+   START CAMERA
+═══════════════════════════════ */
+async function startCamera() {
+  document.getElementById('startOverlay').style.display='none';
+  const lo=document.getElementById('loadOverlay');
+  lo.style.display='flex';
+  document.getElementById('loadText').textContent='Requesting camera...';
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:1280}, height:{ideal:720}, facingMode:'user' }
+    });
+    video.srcObject=stream;
+    await new Promise(r=>video.onloadedmetadata=r);
+    document.getElementById('camDot').className='ft-dot on';
+    document.getElementById('camSt').textContent='Camera on';
+    document.getElementById('loadText').textContent='Loading AI model...';
+    resizeAll();
+    setTimeout(computeToolbarZones, 300);
+
+    mpHands = new Hands({ locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}` });
+    mpHands.setOptions({ maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.72, minTrackingConfidence:0.62 });
+    mpHands.onResults(onResults);
+    document.getElementById('loadText').textContent='Starting hand tracker...';
+    mpCamera = new Camera(video, {
+      onFrame: async()=>{ await mpHands.send({image:video}); },
+      width:1280, height:720
+    });
+    await mpCamera.start();
+    lo.style.display='none';
+  } catch(err) {
+    document.getElementById('loadText').textContent='Error: '+err.message;
+    setTimeout(()=>{ lo.style.display='none'; document.getElementById('startOverlay').style.display='flex'; },3500);
+  }
+}
+</script>
+</body>
+</html>
